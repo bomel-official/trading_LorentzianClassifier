@@ -1,23 +1,15 @@
 import pandas as pd
-import requests
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 from sklearn.impute import SimpleImputer
 
-# задать параметры запроса
-url = 'https://api.bybit.com/v5/market/kline'
-symbol = 'BTCUSDT'
-category = 'linear'
-interval = 'W'
-limit = 200
+with open('data.txt', 'r') as newFile:
+    datalist = []
+    for item in newFile.read().split('\n'):
+        if item:
+            datalist.append([float(x) for x in item.split(' ')])
 
-# отправить запрос и получить данные
-params = {'symbol': symbol, 'category': category, 'interval': interval, 'limit': limit}
-response = requests.get(url, params=params)
-data = response.json()['result']
-
-datalist = data['list']
 
 # преобразовать данные в формат DataFrame
 df = pd.DataFrame(datalist, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover'])
@@ -41,7 +33,7 @@ df = df.iloc[:-1]
 imputer = SimpleImputer(strategy='mean')
 
 # выбрать фичи для обучения модели
-X = df[['open', 'high', 'low', 'volume', 'price_change']]
+X = df[['startTime', 'open']]
 # заменяем NaN на среднее значение в столбце X
 X = imputer.fit_transform(X)
 
@@ -52,7 +44,7 @@ model = LinearRegression()
 model.fit(X, y)
 
 # предсказать цену криптовалюты
-predicted_price = model.predict(df_predict[['open', 'high', 'low', 'volume', 'price_change']])[0]
+predicted_price = model.predict(df_predict[['open']])[0]
 print('Предсказанная цена:', predicted_price)
 
 # отобразить график предсказанной цены и реальной цены
