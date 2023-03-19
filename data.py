@@ -8,9 +8,6 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, LSTM, Dropout, Conv1D, MaxPooling1D
 from tensorflow.keras.optimizers import Adam
 
-# Определим количество дней для прогнозирования
-bars_to_predict = 400
-
 # Импорт данных ByBit
 with open('data.txt', 'r') as newFile:
     datalist = []
@@ -19,35 +16,21 @@ with open('data.txt', 'r') as newFile:
             datalist.append([float(x) for x in item.split(' ')])
 
 # преобразовать данные в формат DataFrame
-df = pd.DataFrame(datalist, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover'])
+df = pd.DataFrame(datalist, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover', 'SMA', 'RSI'])
 df['time'] = pd.to_datetime(df['startTime'], unit='ms')
 df.set_index('time', inplace=True)
 df.drop(['turnover'], axis=1, inplace=True)
-df.columns = ['open', 'startTime', 'high', 'low', 'close', 'volume']
+df.columns = ['open', 'startTime', 'high', 'low', 'close', 'volume', 'SMA', 'RSI']
 df = df.astype(float)
 df = df.iloc[::-1]
-
-# создание новых признаков - скользящие средние и относительная сила индекс
-window_size = 60
-
-sma = df['close'].rolling(window_size).mean()
-df['SMA'] = sma.fillna(method='bfill')
-
-# создание относительной силы индекса (RSI)
-delta = df['close'].diff()
-gain = delta.where(delta > 0, 0)
-loss = -delta.where(delta < 0, 0)
-avg_gain = gain.rolling(window_size).mean()
-avg_loss = loss.rolling(window_size).mean().abs()
-rs = abs(avg_gain / avg_loss)
-rsi = 100 - (100 / (1 + rs))
-df['RSI'] = rsi.fillna(method='bfill')
 
 # масштабирование данных
 scaler = MinMaxScaler(feature_range=(0, 1))
 df['close'] = scaler.fit_transform(np.array(df['close']).reshape(-1, 1))
 df['SMA'] = scaler.fit_transform(np.array(df['SMA']).reshape(-1, 1))
 df['RSI'] = scaler.fit_transform(np.array(df['RSI']).reshape(-1, 1))
+
+window_size = 60
 
 train_size = int(len(df) * 0.99)
 
@@ -86,15 +69,22 @@ if (model is None):
     # Сохранение модели в файл
     model.save('model3.h5')
 
-
 # создание новых прогнозов
-train_size = len(df) - window_size
+test_data = df.iloc[train_size:]
+
+x_test = []
+y_test = []
+
+for i in range(window_size, len(test_data)):
+    x_test.append(test_data[['close', 'SMA', 'RSI']].iloc[i - window_size:i].values)
+    y_test.append(test_data['close'].iloc[i])
+
+x_test, y_test = np.array(x_test), np.array(y_test)
 
 predictions = []
-for i in range(train_size, train_size + bars_to_predict):
-    x_pred = df[['close', 'SMA', 'RSI']].iloc[i - window_size:i].values.reshape(1, window_size, 3)
-    prediction = model.predict(x_pred)
-    predictions.append(prediction[0][0])
+for i in range(train_size, len(df)):
+    prediction = model.predict(np.array([x_test[i - train_size]]))
+    predictions.append(prediction)
     # добавление новых прогнозов в данные для дальнейшего прогнозирования
     new_row = pd.Series({'close': prediction[0][0]})
     df = pd.concat([df, new_row], ignore_index=True)
@@ -109,16 +99,13 @@ for i in range(train_size, train_size + bars_to_predict):
     rs = abs(avg_gain / avg_loss)
     rsi = 100 - (100 / (1 + rs))
     df.at[i, 'RSI'] = rsi[i]
-    
-    # масштабирование новых данных
-    df['close'] = scaler.fit_transform(np.array(df['close']).reshape(-1, 1))
-    df['SMA'] = scaler.fit_transform(np.array(df['SMA']).reshape(-1, 1))
-    df['RSI'] = scaler.fit_transform(np.array(df['RSI']).reshape(-1, 1))
 
-# print(predictions)
-# print(df['close'].iloc[-bars_to_predict:].values)
-print()
-plt.plot(df['close'].iloc[train_size:].values, label='Actual Price')
+    # масштабирование новых данных
+    num_features = x_test.shape[2]
+    new_data = np.array([[prediction[0][0]], [rsi[i]], [df['SMA'].iloc[i]]])
+    x_test = scaler.transform(np.vstack((x_test[0][1:], new_data)).reshape(1, window_size, num_features))
+
+plt.plot(df['close'], label='Actual Price')
 plt.plot(predictions, label='Predicted Price')
 plt.legend()
 plt.show()
